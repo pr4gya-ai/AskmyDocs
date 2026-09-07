@@ -1,4 +1,5 @@
-# AskMyDocs — Day 1: Basic Gemini Chatbot
+# AskMyDocs — Day 1: Basic Gemini Chatbot 
+ Live Demo :  https://askmy-docs-frontend.vercel.app/
  
 No RAG yet — just wiring up Node.js → Gemini → Answer. This is the foundation
 you'll build the retrieval pipeline on top of in later days.
