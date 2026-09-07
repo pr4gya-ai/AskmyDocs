@@ -6,7 +6,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocumentProxy, extractText } from "unpdf";
 import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
@@ -20,31 +20,33 @@ dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
  
 /**
- * Extracts text page-by-page from a PDF using pdfjs-dist directly,
- * instead of LangChain's PDFLoader (which wraps the `pdf-parse` package).
+ * Extracts text page-by-page from a PDF using unpdf, instead of
+ * LangChain's PDFLoader (wraps `pdf-parse`) or raw pdfjs-dist.
  *
- * Why: pdf-parse has a known packaging bug — its package.json "exports"
- * field blocks a subpath it internally requires, which throws
+ * Why not pdf-parse: it has a packaging bug that throws
  * ERR_PACKAGE_PATH_NOT_EXPORTED specifically under serverless bundlers
- * like Vercel's. pdfjs-dist doesn't have this issue and gives the same
- * end result: one Document per page, with the same metadata shape
- * (loc.pageNumber) the rest of this pipeline (splitter, /ask's citations)
- * already expects — so nothing downstream needed to change.
+ * like Vercel's.
+ *
+ * Why not raw pdfjs-dist: it normally offloads parsing to a separate
+ * "worker" file. Vercel's bundler only includes files it can see via
+ * static imports — it doesn't know to include that worker file, since
+ * pdfjs-dist loads it dynamically at runtime. Result: "Setting up fake
+ * worker failed" in production, despite working fine locally.
+ *
+ * unpdf avoids both problems — it's built specifically for edge/
+ * serverless runtimes, with no separate worker file to lose track of.
  */
 async function loadPdfPages(filePath) {
   const data = new Uint8Array(fs.readFileSync(filePath));
-  const pdf = await getDocument({ data }).promise;
+  const pdf = await getDocumentProxy(data);
+  const { text: pagesText, totalPages } = await extractText(pdf, { mergePages: false });
  
   const documents = [];
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items.map((item) => item.str).join(" ");
- 
+  for (let i = 0; i < totalPages; i++) {
     documents.push(
       new Document({
-        pageContent: pageText,
-        metadata: { source: filePath, loc: { pageNumber: pageNum } },
+        pageContent: pagesText[i],
+        metadata: { source: filePath, loc: { pageNumber: i + 1 } },
       })
     );
   }
